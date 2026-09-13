@@ -18,12 +18,26 @@ async fn main() -> anyhow::Result<()> {
             let cache_path = auth::token_cache_path();
             match auth::login(&client_secret, &cache_path, force).await? {
                 auth::LoginOutcome::AlreadyLoggedIn(cache) => {
-                    let email = auth::fetch_user_email(&cache.access_token).await?;
-                    println!("Already logged in as {email}. Use --force to re-authenticate.");
+                    match auth::fetch_user_email(&cache.access_token).await {
+                        Ok(email) => {
+                            println!(
+                                "Already logged in as {email}. Use --force to re-authenticate."
+                            );
+                        }
+                        Err(_) => {
+                            println!(
+                                "Already logged in (could not resolve account email). Use --force to re-authenticate."
+                            );
+                        }
+                    }
                 }
                 auth::LoginOutcome::LoggedIn(cache) => {
-                    let email = auth::fetch_user_email(&cache.access_token).await?;
-                    println!("Logged in as {email}.");
+                    match auth::fetch_user_email(&cache.access_token).await {
+                        Ok(email) => println!("Logged in as {email}."),
+                        Err(_) => println!(
+                            "Logged in (could not resolve account email — try `yt-upload login --force` if this persists)."
+                        ),
+                    }
                 }
             }
         }
@@ -39,10 +53,10 @@ async fn main() -> anyhow::Result<()> {
             let client_secret = load_client_secret()?;
             let cache_path = auth::token_cache_path();
             match auth::status(&client_secret, &cache_path).await? {
-                Some(cache) => {
-                    let email = auth::fetch_user_email(&cache.access_token).await?;
-                    println!("Logged in as {email}.");
-                }
+                Some(cache) => match auth::fetch_user_email(&cache.access_token).await {
+                    Ok(email) => println!("Logged in as {email}."),
+                    Err(_) => println!("Logged in (could not resolve account email)."),
+                },
                 None => println!("Not logged in. Run `yt-upload login`."),
             }
         }
