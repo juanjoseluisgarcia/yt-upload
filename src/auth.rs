@@ -218,6 +218,31 @@ pub async fn get_cached_access_token(
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Run `yt-upload login` first."))
 }
 
+#[derive(Debug)]
+pub enum LoginOutcome {
+    AlreadyLoggedIn(TokenCache),
+    LoggedIn(TokenCache),
+}
+
+/// Authorizes this CLI with a Google account. Unless `force` is set,
+/// reuses an already-valid cached session instead of opening the browser
+/// again.
+pub async fn login(
+    client: &ClientSecret,
+    cache_path: &Path,
+    force: bool,
+) -> anyhow::Result<LoginOutcome> {
+    if !force {
+        if let Some(cache) = valid_cached_token(client, cache_path).await {
+            return Ok(LoginOutcome::AlreadyLoggedIn(cache));
+        }
+    }
+
+    let fresh = run_installed_app_flow(client).await?;
+    save_token_cache(cache_path, &fresh)?;
+    Ok(LoginOutcome::LoggedIn(fresh))
+}
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -423,5 +448,27 @@ mod tests {
 
         let token = get_cached_access_token(&client, &cache_path).await.unwrap();
         assert_eq!(token, "a-1");
+    }
+
+    #[tokio::test]
+    async fn login_returns_already_logged_in_for_a_valid_cached_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let client = ClientSecret {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        };
+        let cache = TokenCache {
+            refresh_token: "r-1".to_string(),
+            access_token: "a-1".to_string(),
+            expires_at: now_unix() + 3600,
+        };
+        save_token_cache(&cache_path, &cache).unwrap();
+
+        let outcome = login(&client, &cache_path, false).await.unwrap();
+        match outcome {
+            LoginOutcome::AlreadyLoggedIn(c) => assert_eq!(c.access_token, "a-1"),
+            LoginOutcome::LoggedIn(_) => panic!("expected AlreadyLoggedIn"),
+        }
     }
 }
