@@ -80,6 +80,126 @@ fn extract_code_from_request_line(request: &str) -> Option<String> {
         .map(|(_, v)| v.into_owned())
 }
 
+#[derive(Debug, Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    expires_in: u64,
+    refresh_token: Option<String>,
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is before the Unix epoch")
+        .as_secs()
+}
+
+pub async fn exchange_code_for_token(
+    client: &ClientSecret,
+    code: &str,
+    redirect_uri: &str,
+) -> anyhow::Result<TokenCache> {
+    let http = reqwest::Client::new();
+    let resp: TokenResponse = http
+        .post(TOKEN_URL)
+        .form(&[
+            ("client_id", client.client_id.as_str()),
+            ("client_secret", client.client_secret.as_str()),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("grant_type", "authorization_code"),
+        ])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    Ok(TokenCache {
+        refresh_token: resp
+            .refresh_token
+            .ok_or_else(|| anyhow::anyhow!("no refresh_token in token response"))?,
+        access_token: resp.access_token,
+        expires_at: now_unix() + resp.expires_in,
+    })
+}
+
+pub async fn refresh_access_token(
+    client: &ClientSecret,
+    cache: &TokenCache,
+) -> anyhow::Result<TokenCache> {
+    let http = reqwest::Client::new();
+    let resp: TokenResponse = http
+        .post(TOKEN_URL)
+        .form(&[
+            ("client_id", client.client_id.as_str()),
+            ("client_secret", client.client_secret.as_str()),
+            ("refresh_token", cache.refresh_token.as_str()),
+            ("grant_type", "refresh_token"),
+        ])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    Ok(TokenCache {
+        refresh_token: cache.refresh_token.clone(),
+        access_token: resp.access_token,
+        expires_at: now_unix() + resp.expires_in,
+    })
+}
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+pub async fn run_installed_app_flow(client: &ClientSecret) -> anyhow::Result<TokenCache> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    let redirect_uri = format!("http://127.0.0.1:{port}");
+
+    let auth_url = build_authorize_url(&client.client_id, &redirect_uri);
+    eprintln!("Open this URL in your browser to authorize yt-upload:\n{auth_url}");
+    let _ = webbrowser::open(&auth_url);
+
+    let (mut stream, _) = listener.accept().await?;
+    let mut buf = [0u8; 4096];
+    let n = stream.read(&mut buf).await?;
+    let request = String::from_utf8_lossy(&buf[..n]);
+    let code = extract_code_from_request_line(&request)
+        .ok_or_else(|| anyhow::anyhow!("no authorization code found in OAuth redirect"))?;
+
+    let body = "Authorization received. You can close this tab and return to the terminal.";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).await?;
+
+    exchange_code_for_token(client, &code, &redirect_uri).await
+}
+
+/// Returns a valid access token, refreshing or running the full browser
+/// consent flow as needed, and persisting the result to `cache_path`.
+pub async fn get_valid_access_token(
+    client: &ClientSecret,
+    cache_path: &Path,
+) -> anyhow::Result<String> {
+    if let Some(cache) = load_token_cache(cache_path) {
+        if cache.expires_at > now_unix() + 60 {
+            return Ok(cache.access_token);
+        }
+        let refreshed = refresh_access_token(client, &cache).await?;
+        save_token_cache(cache_path, &refreshed)?;
+        return Ok(refreshed.access_token);
+    }
+
+    let fresh = run_installed_app_flow(client).await?;
+    save_token_cache(cache_path, &fresh)?;
+    Ok(fresh.access_token)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
