@@ -255,6 +255,15 @@ pub fn logout(cache_path: &Path) -> anyhow::Result<bool> {
     }
 }
 
+/// Reports the currently authorized session, if any, silently
+/// refreshing it first if it's close to expiry.
+pub async fn status(
+    client: &ClientSecret,
+    cache_path: &Path,
+) -> anyhow::Result<Option<TokenCache>> {
+    Ok(valid_cached_token(client, cache_path).await)
+}
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -297,37 +306,6 @@ pub async fn run_installed_app_flow(client: &ClientSecret) -> anyhow::Result<Tok
     stream.write_all(response.as_bytes()).await?;
 
     exchange_code_for_token(client, &code, &redirect_uri).await
-}
-
-/// Returns a valid access token, refreshing or running the full browser
-/// consent flow as needed, and persisting the result to `cache_path`.
-pub async fn get_valid_access_token(
-    client: &ClientSecret,
-    cache_path: &Path,
-) -> anyhow::Result<String> {
-    if let Some(cache) = load_token_cache(cache_path) {
-        if cache.expires_at > now_unix() + 60 {
-            return Ok(cache.access_token);
-        }
-        match refresh_access_token(client, &cache).await {
-            Ok(refreshed) => {
-                save_token_cache(cache_path, &refreshed)?;
-                return Ok(refreshed.access_token);
-            }
-            Err(_) => {
-                // The refresh token may have been revoked or expired.
-                // Fall back to a fresh browser consent flow rather than
-                // failing the whole program outright.
-                let fresh = run_installed_app_flow(client).await?;
-                save_token_cache(cache_path, &fresh)?;
-                return Ok(fresh.access_token);
-            }
-        }
-    }
-
-    let fresh = run_installed_app_flow(client).await?;
-    save_token_cache(cache_path, &fresh)?;
-    Ok(fresh.access_token)
 }
 
 #[cfg(test)]
@@ -505,5 +483,36 @@ mod tests {
         let cache_path = dir.path().join("token.json");
 
         assert!(!logout(&cache_path).unwrap());
+    }
+
+    #[tokio::test]
+    async fn status_returns_none_when_not_logged_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let client = ClientSecret {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        };
+
+        assert!(status(&client, &cache_path).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn status_returns_cache_when_logged_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let client = ClientSecret {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        };
+        let cache = TokenCache {
+            refresh_token: "r-1".to_string(),
+            access_token: "a-1".to_string(),
+            expires_at: now_unix() + 3600,
+        };
+        save_token_cache(&cache_path, &cache).unwrap();
+
+        let result = status(&client, &cache_path).await.unwrap();
+        assert_eq!(result.unwrap().access_token, "a-1");
     }
 }
