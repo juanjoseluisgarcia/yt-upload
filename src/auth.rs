@@ -243,6 +243,18 @@ pub async fn login(
     Ok(LoginOutcome::LoggedIn(fresh))
 }
 
+/// Deletes the cached credentials, if any (local only — this does not
+/// revoke the refresh token with Google). Returns whether a cache
+/// existed and was removed.
+pub fn logout(cache_path: &Path) -> anyhow::Result<bool> {
+    if cache_path.exists() {
+        std::fs::remove_file(cache_path)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -470,5 +482,28 @@ mod tests {
             LoginOutcome::AlreadyLoggedIn(c) => assert_eq!(c.access_token, "a-1"),
             LoginOutcome::LoggedIn(_) => panic!("expected AlreadyLoggedIn"),
         }
+    }
+
+    #[test]
+    fn logout_removes_an_existing_cache_and_reports_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let cache = TokenCache {
+            refresh_token: "r-1".to_string(),
+            access_token: "a-1".to_string(),
+            expires_at: 1_700_000_000,
+        };
+        save_token_cache(&cache_path, &cache).unwrap();
+
+        assert!(logout(&cache_path).unwrap());
+        assert!(!cache_path.exists());
+    }
+
+    #[test]
+    fn logout_reports_false_when_nothing_is_cached() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+
+        assert!(!logout(&cache_path).unwrap());
     }
 }
