@@ -1,4 +1,4 @@
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -18,10 +18,32 @@ impl Privacy {
     }
 }
 
-/// Upload a video to YouTube using the resumable upload protocol.
+/// Upload videos to YouTube using the resumable upload protocol.
 #[derive(Debug, Parser)]
 #[command(name = "yt-upload")]
-pub struct Args {
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Upload a video to YouTube using the resumable upload protocol
+    Upload(UploadArgs),
+    /// Authorize this CLI with a Google account
+    Login {
+        /// Re-run the browser consent flow even if already logged in
+        #[arg(long)]
+        force: bool,
+    },
+    /// Forget the cached credentials
+    Logout,
+    /// Show whether yt-upload is currently authorized
+    Status,
+}
+
+#[derive(Debug, Parser)]
+pub struct UploadArgs {
     /// Path to the video file to upload
     pub file: PathBuf,
 
@@ -50,16 +72,28 @@ pub struct Args {
 mod tests {
     use super::*;
 
+    fn upload_args(cli: Cli) -> UploadArgs {
+        match cli.command {
+            Command::Upload(args) => args,
+            other => panic!("expected Command::Upload, got {other:?}"),
+        }
+    }
+
     #[test]
     fn parses_required_file_and_title() {
-        let args = Args::try_parse_from(["yt-upload", "video.mp4", "--title", "My Video"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["yt-upload", "upload", "video.mp4", "--title", "My Video"])
+                .unwrap();
+        let args = upload_args(cli);
         assert_eq!(args.file.to_str().unwrap(), "video.mp4");
         assert_eq!(args.title, "My Video");
     }
 
     #[test]
     fn defaults_privacy_private_and_category_22() {
-        let args = Args::try_parse_from(["yt-upload", "video.mp4", "--title", "T"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["yt-upload", "upload", "video.mp4", "--title", "T"]).unwrap();
+        let args = upload_args(cli);
         assert_eq!(args.privacy, Privacy::Private);
         assert_eq!(args.category, 22);
         assert_eq!(args.description, "");
@@ -68,16 +102,19 @@ mod tests {
 
     #[test]
     fn tags_split_on_comma() {
-        let args =
-            Args::try_parse_from(["yt-upload", "video.mp4", "--title", "T", "--tags", "a,b,c"])
-                .unwrap();
+        let cli = Cli::try_parse_from([
+            "yt-upload", "upload", "video.mp4", "--title", "T", "--tags", "a,b,c",
+        ])
+        .unwrap();
+        let args = upload_args(cli);
         assert_eq!(args.tags, vec!["a", "b", "c"]);
     }
 
     #[test]
     fn privacy_accepts_unlisted_and_public() {
-        let args = Args::try_parse_from([
+        let cli = Cli::try_parse_from([
             "yt-upload",
+            "upload",
             "video.mp4",
             "--title",
             "T",
@@ -85,13 +122,32 @@ mod tests {
             "unlisted",
         ])
         .unwrap();
+        let args = upload_args(cli);
         assert_eq!(args.privacy, Privacy::Unlisted);
         assert_eq!(args.privacy.as_api_str(), "unlisted");
     }
 
     #[test]
     fn missing_title_is_an_error() {
-        let result = Args::try_parse_from(["yt-upload", "video.mp4"]);
+        let result = Cli::try_parse_from(["yt-upload", "upload", "video.mp4"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn login_parses_with_and_without_force() {
+        let cli = Cli::try_parse_from(["yt-upload", "login"]).unwrap();
+        assert!(matches!(cli.command, Command::Login { force: false }));
+
+        let cli = Cli::try_parse_from(["yt-upload", "login", "--force"]).unwrap();
+        assert!(matches!(cli.command, Command::Login { force: true }));
+    }
+
+    #[test]
+    fn logout_and_status_parse() {
+        let cli = Cli::try_parse_from(["yt-upload", "logout"]).unwrap();
+        assert!(matches!(cli.command, Command::Logout));
+
+        let cli = Cli::try_parse_from(["yt-upload", "status"]).unwrap();
+        assert!(matches!(cli.command, Command::Status));
     }
 }

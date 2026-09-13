@@ -1,7 +1,7 @@
-use crate::cli::Args;
+use crate::cli::UploadArgs;
 use serde_json::{json, Value};
 
-pub fn build_metadata(args: &Args) -> Value {
+pub fn build_metadata(args: &UploadArgs) -> Value {
     let tags: Vec<&str> = args
         .tags
         .iter()
@@ -28,8 +28,8 @@ mod tests {
     use crate::cli::Privacy;
     use std::path::PathBuf;
 
-    fn sample_args() -> Args {
-        Args {
+    fn sample_args() -> UploadArgs {
+        UploadArgs {
             file: PathBuf::from("video.mp4"),
             title: "My Title".to_string(),
             description: "My description".to_string(),
