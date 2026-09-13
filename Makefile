@@ -1,4 +1,4 @@
-.PHONY: build release test fmt fmt-check lint clean run install check
+.PHONY: build release test fmt fmt-check lint clean run install check man
 
 build:
 	cargo build
@@ -28,3 +28,6 @@ install:
 
 clean:
 	cargo clean
+
+man:
+	cargo run --example gen-man

@@ -1,0 +1,43 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH yt-upload-upload 1  "upload " 
+.SH NAME
+yt\-upload\-upload \- Upload a video to YouTube using the resumable upload protocol
+.SH SYNOPSIS
+\fByt\-upload upload\fR <\fB\-\-title\fR> [\fB\-\-description\fR] [\fB\-\-tags\fR] [\fB\-\-privacy\fR] [\fB\-\-category\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fIFILE\fR> 
+.SH DESCRIPTION
+Upload a video to YouTube using the resumable upload protocol
+.SH OPTIONS
+.TP
+\fB\-\-title\fR \fI<TITLE>\fR
+Video title
+.TP
+\fB\-\-description\fR \fI<DESCRIPTION>\fR [default: ]
+Video description
+.TP
+\fB\-\-tags\fR \fI<TAGS>\fR
+Comma\-separated tags
+.TP
+\fB\-\-privacy\fR \fI<PRIVACY>\fR [default: private]
+Privacy status
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+private
+.IP \(bu 2
+unlisted
+.IP \(bu 2
+public
+.RE
+.TP
+\fB\-\-category\fR \fI<CATEGORY>\fR [default: 22]
+YouTube category ID
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fIFILE\fR>
+Path to the video file to upload

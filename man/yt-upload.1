@@ -1,0 +1,29 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH yt-upload 1  "yt-upload " 
+.SH NAME
+yt\-upload \- Upload videos to YouTube using the resumable upload protocol
+.SH SYNOPSIS
+\fByt\-upload\fR [\fB\-h\fR|\fB\-\-help\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Upload videos to YouTube using the resumable upload protocol
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+yt\-upload\-upload(1)
+Upload a video to YouTube using the resumable upload protocol
+.TP
+yt\-upload\-login(1)
+Authorize this CLI with a Google account
+.TP
+yt\-upload\-logout(1)
+Forget the cached credentials
+.TP
+yt\-upload\-status(1)
+Show whether yt\-upload is currently authorized
+.TP
+yt\-upload\-help(1)
+Print this message or the help of the given subcommand(s)

@@ -18,7 +18,8 @@ brew install yt-upload
 ```
 
 This builds from source (Rust must be available, which Homebrew installs
-automatically as a build dependency).
+automatically as a build dependency) and also installs man pages —
+`man yt-upload`, `man yt-upload-upload`, `man yt-upload-login`, etc.
 
 ## Setup
 
