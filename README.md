@@ -10,6 +10,16 @@ protocol.
 > This project is not affiliated with, sponsored by, or endorsed by YouTube
 > or Google. "YouTube" is a trademark of Google LLC.
 
+## Install
+
+```bash
+brew tap juanjoseluisgarcia/yt-upload
+brew install yt-upload
+```
+
+This builds from source (Rust must be available, which Homebrew installs
+automatically as a build dependency).
+
 ## Setup
 
 1. Create a Google Cloud project and enable the YouTube Data API v3.
