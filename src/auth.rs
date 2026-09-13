@@ -332,21 +332,6 @@ mod tests {
         assert_eq!(loaded.expires_at, cache.expires_at);
     }
 
-    #[test]
-    fn extract_code_from_request_line_parses_code() {
-        let request = "GET /?code=4/xyz&scope=foo HTTP/1.1\r\nHost: localhost\r\n\r\n";
-        assert_eq!(
-            extract_code_from_request_line(request),
-            Some("4/xyz".to_string())
-        );
-    }
-
-    #[test]
-    fn extract_code_from_request_line_returns_none_without_code() {
-        let request = "GET /favicon.ico HTTP/1.1\r\n\r\n";
-        assert_eq!(extract_code_from_request_line(request), None);
-    }
-
     #[tokio::test]
     async fn valid_cached_token_returns_none_when_no_cache_exists() {
         let dir = tempfile::tempdir().unwrap();
@@ -376,5 +361,20 @@ mod tests {
 
         let result = valid_cached_token(&client, &cache_path).await;
         assert_eq!(result.unwrap().access_token, "a-1");
+    }
+
+    #[test]
+    fn extract_code_from_request_line_parses_code() {
+        let request = "GET /?code=4/xyz&scope=foo HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(
+            extract_code_from_request_line(request),
+            Some("4/xyz".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_code_from_request_line_returns_none_without_code() {
+        let request = "GET /favicon.ico HTTP/1.1\r\n\r\n";
+        assert_eq!(extract_code_from_request_line(request), None);
     }
 }
