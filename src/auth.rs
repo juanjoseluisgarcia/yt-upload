@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub const SCOPE: &str =
@@ -74,7 +75,12 @@ fn restrict_permissions(_path: &Path, _mode: u32) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn build_authorize_url(client_id: &str, redirect_uri: &str) -> String {
+pub fn build_authorize_url(
+    client_id: &str,
+    redirect_uri: &str,
+    code_challenge: &str,
+    state: &str,
+) -> String {
     let mut url = url::Url::parse(AUTH_URL).expect("AUTH_URL is a valid URL");
     url.query_pairs_mut()
         .append_pair("client_id", client_id)
@@ -82,19 +88,66 @@ pub fn build_authorize_url(client_id: &str, redirect_uri: &str) -> String {
         .append_pair("response_type", "code")
         .append_pair("scope", SCOPE)
         .append_pair("access_type", "offline")
-        .append_pair("prompt", "consent");
+        .append_pair("prompt", "consent")
+        .append_pair("code_challenge", code_challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("state", state);
     url.to_string()
 }
 
-/// Extracts the `code` query parameter from the first line of a raw HTTP
+/// Generates a PKCE code verifier: a random string from the unreserved
+/// character set allowed by RFC 7636 (`[A-Za-z0-9-._~]`), long enough to
+/// satisfy the spec's 43-128 character range.
+fn generate_code_verifier() -> String {
+    use rand::Rng;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut rng = rand::thread_rng();
+    (0..64)
+        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
+        .collect()
+}
+
+/// Derives the PKCE `S256` code challenge from a code verifier: the
+/// base64url-encoded (no padding) SHA-256 digest of the verifier, per
+/// RFC 7636 section 4.2.
+fn code_challenge_from_verifier(verifier: &str) -> String {
+    use base64::Engine;
+    let digest = Sha256::digest(verifier.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+}
+
+/// Generates a random opaque token for the OAuth `state` parameter, used
+/// to verify the redirect that reaches the loopback listener actually
+/// corresponds to the authorization request this process just made.
+fn generate_state() -> String {
+    generate_code_verifier()
+}
+
+/// Extracts a named query parameter from the first line of a raw HTTP
 /// request (as received on the OAuth loopback redirect listener).
-fn extract_code_from_request_line(request: &str) -> Option<String> {
+fn extract_query_param(request: &str, key: &str) -> Option<String> {
     let first_line = request.lines().next()?;
     let path = first_line.split_whitespace().nth(1)?;
     let query = path.split_once('?')?.1;
     url::form_urlencoded::parse(query.as_bytes())
-        .find(|(k, _)| k == "code")
+        .find(|(k, _)| k == key)
         .map(|(_, v)| v.into_owned())
+}
+
+/// Verifies the `state` value returned on the OAuth redirect matches the
+/// one this process generated for the request, guarding against a
+/// response being accepted for a request it didn't originate (CSRF /
+/// stray-request injection against the loopback listener).
+fn verify_state(expected: &str, actual: Option<&str>) -> anyhow::Result<()> {
+    match actual {
+        Some(actual) if actual == expected => Ok(()),
+        Some(_) => Err(anyhow::anyhow!(
+            "OAuth redirect state did not match the expected value"
+        )),
+        None => Err(anyhow::anyhow!(
+            "OAuth redirect is missing the state parameter"
+        )),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,6 +168,7 @@ pub async fn exchange_code_for_token(
     client: &ClientSecret,
     code: &str,
     redirect_uri: &str,
+    code_verifier: &str,
 ) -> anyhow::Result<TokenCache> {
     let http = reqwest::Client::new();
     let resp: TokenResponse = http
@@ -125,6 +179,7 @@ pub async fn exchange_code_for_token(
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("grant_type", "authorization_code"),
+            ("code_verifier", code_verifier),
         ])
         .send()
         .await?
@@ -294,7 +349,11 @@ pub async fn run_installed_app_flow(client: &ClientSecret) -> anyhow::Result<Tok
     let port = listener.local_addr()?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}");
 
-    let auth_url = build_authorize_url(&client.client_id, &redirect_uri);
+    let code_verifier = generate_code_verifier();
+    let code_challenge = code_challenge_from_verifier(&code_verifier);
+    let state = generate_state();
+
+    let auth_url = build_authorize_url(&client.client_id, &redirect_uri, &code_challenge, &state);
     eprintln!("Open this URL in your browser to authorize yt-upload:\n{auth_url}");
     let _ = webbrowser::open(&auth_url);
 
@@ -302,7 +361,20 @@ pub async fn run_installed_app_flow(client: &ClientSecret) -> anyhow::Result<Tok
     let mut buf = [0u8; 4096];
     let n = stream.read(&mut buf).await?;
     let request = String::from_utf8_lossy(&buf[..n]);
-    let code = match extract_code_from_request_line(&request) {
+
+    if let Err(e) = verify_state(&state, extract_query_param(&request, "state").as_deref()) {
+        let body =
+            "Authorization could not be verified. You can close this tab and return to the terminal.";
+        let response = format!(
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+        return Err(e);
+    }
+
+    let code = match extract_query_param(&request, "code") {
         Some(code) => code,
         None => {
             let body =
@@ -327,7 +399,7 @@ pub async fn run_installed_app_flow(client: &ClientSecret) -> anyhow::Result<Tok
     );
     stream.write_all(response.as_bytes()).await?;
 
-    exchange_code_for_token(client, &code, &redirect_uri).await
+    exchange_code_for_token(client, &code, &redirect_uri, &code_verifier).await
 }
 
 #[cfg(test)]
@@ -336,12 +408,58 @@ mod tests {
 
     #[test]
     fn build_authorize_url_contains_client_id_scope_and_redirect() {
-        let url = build_authorize_url("abc123", "http://127.0.0.1:9000");
+        let url = build_authorize_url(
+            "abc123",
+            "http://127.0.0.1:9000",
+            "test-challenge",
+            "test-state",
+        );
         assert!(url.contains("client_id=abc123"));
         assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A9000"));
-        assert!(url.contains("youtube.upload"));
-        assert!(url.contains("userinfo.email"));
+        assert!(url.contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fyoutube.upload+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email"));
         assert!(url.contains("response_type=code"));
+        assert!(url.contains("code_challenge=test-challenge"));
+        assert!(url.contains("code_challenge_method=S256"));
+        assert!(url.contains("state=test-state"));
+    }
+
+    #[test]
+    fn code_challenge_from_verifier_matches_rfc7636_test_vector() {
+        // RFC 7636 Appendix B.
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        assert_eq!(
+            code_challenge_from_verifier(verifier),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+    }
+
+    #[test]
+    fn generate_code_verifier_produces_rfc7636_compliant_output() {
+        let verifier = generate_code_verifier();
+        assert!(verifier.len() >= 43 && verifier.len() <= 128);
+        assert!(verifier
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~".contains(&b)));
+    }
+
+    #[test]
+    fn generate_code_verifier_is_random() {
+        assert_ne!(generate_code_verifier(), generate_code_verifier());
+    }
+
+    #[test]
+    fn verify_state_accepts_matching_state() {
+        assert!(verify_state("abc", Some("abc")).is_ok());
+    }
+
+    #[test]
+    fn verify_state_rejects_mismatched_state() {
+        assert!(verify_state("abc", Some("xyz")).is_err());
+    }
+
+    #[test]
+    fn verify_state_rejects_missing_state() {
+        assert!(verify_state("abc", None).is_err());
     }
 
     #[test]
@@ -442,18 +560,27 @@ mod tests {
     }
 
     #[test]
-    fn extract_code_from_request_line_parses_code() {
+    fn extract_query_param_parses_code() {
         let request = "GET /?code=4/xyz&scope=foo HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
-            extract_code_from_request_line(request),
+            extract_query_param(request, "code"),
             Some("4/xyz".to_string())
         );
     }
 
     #[test]
-    fn extract_code_from_request_line_returns_none_without_code() {
+    fn extract_query_param_returns_none_without_match() {
         let request = "GET /favicon.ico HTTP/1.1\r\n\r\n";
-        assert_eq!(extract_code_from_request_line(request), None);
+        assert_eq!(extract_query_param(request, "code"), None);
+    }
+
+    #[test]
+    fn extract_query_param_parses_state() {
+        let request = "GET /?code=4/xyz&state=xyz123 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(
+            extract_query_param(request, "state"),
+            Some("xyz123".to_string())
+        );
     }
 
     #[tokio::test]

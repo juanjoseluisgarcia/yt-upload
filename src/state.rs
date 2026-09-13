@@ -8,6 +8,10 @@ pub struct UploadState {
     pub file_size: u64,
     pub file_mtime: u64,
     pub session_uri: String,
+    /// Fingerprint of the video metadata (title, description, tags,
+    /// category, privacy) in effect when this session was created, so a
+    /// resume can detect that the caller's metadata has since changed.
+    pub metadata_hash: String,
 }
 
 pub fn state_dir() -> PathBuf {
@@ -97,6 +101,7 @@ mod tests {
             file_size: 12345,
             file_mtime: 1_700_000_000,
             session_uri: "https://example.com/session".to_string(),
+            metadata_hash: "hash".to_string(),
         };
 
         save_state(&path, &state).unwrap();
@@ -120,6 +125,7 @@ mod tests {
             file_size: 1,
             file_mtime: 1,
             session_uri: "https://example.com/session".to_string(),
+            metadata_hash: "hash".to_string(),
         };
         save_state(&path, &state).unwrap();
         delete_state(&path);
@@ -133,6 +139,7 @@ mod tests {
             file_size: 100,
             file_mtime: 200,
             session_uri: "y".to_string(),
+            metadata_hash: "hash".to_string(),
         };
         assert!(matches_current_file(&state, 100, 200));
     }
@@ -144,6 +151,7 @@ mod tests {
             file_size: 100,
             file_mtime: 200,
             session_uri: "y".to_string(),
+            metadata_hash: "hash".to_string(),
         };
         assert!(!matches_current_file(&state, 999, 200));
     }
@@ -155,6 +163,7 @@ mod tests {
             file_size: 100,
             file_mtime: 200,
             session_uri: "y".to_string(),
+            metadata_hash: "hash".to_string(),
         };
         assert!(!matches_current_file(&state, 100, 999));
     }

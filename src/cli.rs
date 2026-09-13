@@ -20,7 +20,7 @@ impl Privacy {
 
 /// Upload videos to YouTube using the resumable upload protocol.
 #[derive(Debug, Parser)]
-#[command(name = "yt-upload")]
+#[command(name = "yt-upload", disable_help_subcommand = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,

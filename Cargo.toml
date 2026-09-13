@@ -1,6 +1,6 @@
 [package]
 name = "yt-upload"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 
@@ -16,7 +16,10 @@ hex = "0.4"
 url = "2"
 webbrowser = "0.8"
 anyhow = "1"
+rand = "0.8"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
 clap_mangen = "0.2"
+wiremock = "0.6"
