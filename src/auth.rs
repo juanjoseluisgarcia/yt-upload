@@ -204,6 +204,20 @@ async fn valid_cached_token(client: &ClientSecret, cache_path: &Path) -> Option<
     Some(refreshed)
 }
 
+/// Returns the currently cached access token, silently refreshing it if
+/// it's close to expiry. Unlike the old always-interactive flow, this
+/// never opens a browser — callers that want to start a new session use
+/// `login` instead.
+pub async fn get_cached_access_token(
+    client: &ClientSecret,
+    cache_path: &Path,
+) -> anyhow::Result<String> {
+    valid_cached_token(client, cache_path)
+        .await
+        .map(|cache| cache.access_token)
+        .ok_or_else(|| anyhow::anyhow!("Not logged in. Run `yt-upload login` first."))
+}
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -376,5 +390,38 @@ mod tests {
     fn extract_code_from_request_line_returns_none_without_code() {
         let request = "GET /favicon.ico HTTP/1.1\r\n\r\n";
         assert_eq!(extract_code_from_request_line(request), None);
+    }
+
+    #[tokio::test]
+    async fn get_cached_access_token_errors_when_not_logged_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let client = ClientSecret {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        };
+
+        let result = get_cached_access_token(&client, &cache_path).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("yt-upload login"));
+    }
+
+    #[tokio::test]
+    async fn get_cached_access_token_returns_valid_cached_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let client = ClientSecret {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        };
+        let cache = TokenCache {
+            refresh_token: "r-1".to_string(),
+            access_token: "a-1".to_string(),
+            expires_at: now_unix() + 3600,
+        };
+        save_token_cache(&cache_path, &cache).unwrap();
+
+        let token = get_cached_access_token(&client, &cache_path).await.unwrap();
+        assert_eq!(token, "a-1");
     }
 }
