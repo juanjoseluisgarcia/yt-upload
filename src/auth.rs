@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub const SCOPE: &str = "https://www.googleapis.com/auth/youtube.upload";
+pub const SCOPE: &str =
+    "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/userinfo.email";
 pub const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
@@ -250,7 +251,8 @@ mod tests {
         let url = build_authorize_url("abc123", "http://127.0.0.1:9000");
         assert!(url.contains("client_id=abc123"));
         assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A9000"));
-        assert!(url.contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fyoutube.upload"));
+        assert!(url.contains("youtube.upload"));
+        assert!(url.contains("userinfo.email"));
         assert!(url.contains("response_type=code"));
     }
 
