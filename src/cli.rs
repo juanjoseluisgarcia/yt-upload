@@ -81,9 +81,8 @@ mod tests {
 
     #[test]
     fn parses_required_file_and_title() {
-        let cli =
-            Cli::try_parse_from(["yt-upload", "upload", "video.mp4", "--title", "My Video"])
-                .unwrap();
+        let cli = Cli::try_parse_from(["yt-upload", "upload", "video.mp4", "--title", "My Video"])
+            .unwrap();
         let args = upload_args(cli);
         assert_eq!(args.file.to_str().unwrap(), "video.mp4");
         assert_eq!(args.title, "My Video");
@@ -103,7 +102,13 @@ mod tests {
     #[test]
     fn tags_split_on_comma() {
         let cli = Cli::try_parse_from([
-            "yt-upload", "upload", "video.mp4", "--title", "T", "--tags", "a,b,c",
+            "yt-upload",
+            "upload",
+            "video.mp4",
+            "--title",
+            "T",
+            "--tags",
+            "a,b,c",
         ])
         .unwrap();
         let args = upload_args(cli);
