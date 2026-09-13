@@ -21,20 +21,48 @@ protocol.
 
 ## Usage
 
+Authorize the CLI once:
+
 ```bash
-yt-upload video.mp4 --title "My Video" \
+yt-upload login
+```
+
+This opens a browser window for you to authorize the app; the resulting
+token is cached locally so later commands don't need to reauthorize. Run
+`yt-upload login --force` to switch accounts or re-authorize explicitly.
+
+Check whether you're currently authorized, and as which account:
+
+```bash
+yt-upload status
+```
+
+Forget the cached credentials:
+
+```bash
+yt-upload logout
+```
+
+Upload a video:
+
+```bash
+yt-upload upload video.mp4 --title "My Video" \
   --description "A description" \
   --tags rust,youtube \
   --privacy unlisted \
   --category 22
 ```
 
-On first run, a browser window opens for you to authorize the app; the
-resulting token is cached locally so later runs don't need to reauthorize.
+`upload` requires an existing session — if none exists it errors out with
+a pointer to run `yt-upload login`, rather than opening a browser
+mid-upload.
 
-If the upload is interrupted (network drop, process killed), re-running the
-same command on the same file resumes from the last confirmed byte instead
-of starting over.
+If the upload is interrupted (network drop, process killed), re-running
+the same command on the same file resumes from the last confirmed byte
+instead of starting over.
+
+Run `yt-upload --help` (or `yt-upload <command> --help`) for the full list
+of flags for any command.
 
 ## License
 
