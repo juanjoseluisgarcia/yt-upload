@@ -189,6 +189,21 @@ pub async fn fetch_user_email(access_token: &str) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("Google did not return an email address for this account"))
 }
 
+/// Returns the cached session if it's usable right now: present, and
+/// either not close to expiry or successfully refreshed (with the
+/// refreshed token persisted back to `cache_path`). Returns `None` if
+/// there's no cache, or the refresh token has been revoked/expired —
+/// callers treat that the same as "not logged in".
+async fn valid_cached_token(client: &ClientSecret, cache_path: &Path) -> Option<TokenCache> {
+    let cache = load_token_cache(cache_path)?;
+    if cache.expires_at > now_unix() + 60 {
+        return Some(cache);
+    }
+    let refreshed = refresh_access_token(client, &cache).await.ok()?;
+    save_token_cache(cache_path, &refreshed).ok()?;
+    Some(refreshed)
+}
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -330,5 +345,36 @@ mod tests {
     fn extract_code_from_request_line_returns_none_without_code() {
         let request = "GET /favicon.ico HTTP/1.1\r\n\r\n";
         assert_eq!(extract_code_from_request_line(request), None);
+    }
+
+    #[tokio::test]
+    async fn valid_cached_token_returns_none_when_no_cache_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let client = ClientSecret {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        };
+
+        assert!(valid_cached_token(&client, &cache_path).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn valid_cached_token_returns_cache_without_refreshing_when_not_near_expiry() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("token.json");
+        let client = ClientSecret {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        };
+        let cache = TokenCache {
+            refresh_token: "r-1".to_string(),
+            access_token: "a-1".to_string(),
+            expires_at: now_unix() + 3600,
+        };
+        save_token_cache(&cache_path, &cache).unwrap();
+
+        let result = valid_cached_token(&client, &cache_path).await;
+        assert_eq!(result.unwrap().access_token, "a-1");
     }
 }
