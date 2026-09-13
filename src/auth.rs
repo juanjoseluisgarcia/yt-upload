@@ -38,9 +38,8 @@ pub fn token_cache_path() -> PathBuf {
 }
 
 pub fn load_client_secret(path: &Path) -> anyhow::Result<ClientSecret> {
-    let data = std::fs::read_to_string(path).map_err(|e| {
-        anyhow::anyhow!("could not read client secret at {}: {e}", path.display())
-    })?;
+    let data = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("could not read client secret at {}: {e}", path.display()))?;
     let file: ClientSecretFile = serde_json::from_str(&data)?;
     Ok(file.installed)
 }
@@ -194,7 +193,9 @@ pub async fn run_installed_app_flow(client: &ClientSecret) -> anyhow::Result<Tok
                 body
             );
             let _ = stream.write_all(response.as_bytes()).await;
-            return Err(anyhow::anyhow!("no authorization code found in OAuth redirect"));
+            return Err(anyhow::anyhow!(
+                "no authorization code found in OAuth redirect"
+            ));
         }
     };
 

@@ -1,7 +1,14 @@
-# yt-upload
+<p align="center">
+  <img src="assets/logo.svg" width="120" alt="yt-upload logo">
+</p>
+
+<h1 align="center">yt-upload</h1>
 
 A small CLI that uploads a video to YouTube using the resumable upload
 protocol.
+
+> This project is not affiliated with, sponsored by, or endorsed by YouTube
+> or Google. "YouTube" is a trademark of Google LLC.
 
 ## Setup
 
@@ -28,3 +35,7 @@ resulting token is cached locally so later runs don't need to reauthorize.
 If the upload is interrupted (network drop, process killed), re-running the
 same command on the same file resumes from the last confirmed byte instead
 of starting over.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

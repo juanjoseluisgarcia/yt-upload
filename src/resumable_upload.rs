@@ -178,7 +178,10 @@ pub async fn run(
     let file_size = file_meta.len();
 
     if file_size == 0 {
-        return Err(anyhow!("cannot upload an empty file: {}", video_path.display()));
+        return Err(anyhow!(
+            "cannot upload an empty file: {}",
+            video_path.display()
+        ));
     }
 
     let mtime = file_meta
@@ -190,8 +193,7 @@ pub async fn run(
 
     let (session_uri, mut uploaded) = match state::load_state(&state_path) {
         Some(existing) if state::matches_current_file(&existing, file_size, mtime) => {
-            match query_uploaded_bytes(http, access_token, &existing.session_uri, file_size).await
-            {
+            match query_uploaded_bytes(http, access_token, &existing.session_uri, file_size).await {
                 Ok(ChunkOutcome::Incomplete(bytes)) => (existing.session_uri, bytes),
                 Ok(ChunkOutcome::Complete(video_id)) => {
                     state::delete_state(&state_path);
@@ -268,7 +270,10 @@ mod tests {
 
     #[test]
     fn parses_uploaded_bytes_from_range_header() {
-        assert_eq!(parse_uploaded_bytes_from_range("bytes=0-999").unwrap(), 1000);
+        assert_eq!(
+            parse_uploaded_bytes_from_range("bytes=0-999").unwrap(),
+            1000
+        );
     }
 
     #[test]

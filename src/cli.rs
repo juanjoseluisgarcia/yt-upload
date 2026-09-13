@@ -68,17 +68,21 @@ mod tests {
 
     #[test]
     fn tags_split_on_comma() {
-        let args = Args::try_parse_from([
-            "yt-upload", "video.mp4", "--title", "T", "--tags", "a,b,c",
-        ])
-        .unwrap();
+        let args =
+            Args::try_parse_from(["yt-upload", "video.mp4", "--title", "T", "--tags", "a,b,c"])
+                .unwrap();
         assert_eq!(args.tags, vec!["a", "b", "c"]);
     }
 
     #[test]
     fn privacy_accepts_unlisted_and_public() {
         let args = Args::try_parse_from([
-            "yt-upload", "video.mp4", "--title", "T", "--privacy", "unlisted",
+            "yt-upload",
+            "video.mp4",
+            "--title",
+            "T",
+            "--privacy",
+            "unlisted",
         ])
         .unwrap();
         assert_eq!(args.privacy, Privacy::Unlisted);

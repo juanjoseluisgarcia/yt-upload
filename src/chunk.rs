@@ -25,7 +25,11 @@ pub fn next_chunk_range(uploaded: u64, total: u64, chunk_size: u64) -> Option<Ch
         return None;
     }
     let end = std::cmp::min(uploaded + chunk_size - 1, total - 1);
-    Some(ChunkRange { start: uploaded, end, total })
+    Some(ChunkRange {
+        start: uploaded,
+        end,
+        total,
+    })
 }
 
 #[cfg(test)]
@@ -57,7 +61,11 @@ mod tests {
 
     #[test]
     fn content_range_header_format() {
-        let range = ChunkRange { start: 0, end: 99, total: 500 };
+        let range = ChunkRange {
+            start: 0,
+            end: 99,
+            total: 500,
+        };
         assert_eq!(range.content_range_header(), "bytes 0-99/500");
     }
 }
