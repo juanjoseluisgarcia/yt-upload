@@ -2,11 +2,18 @@ use crate::cli::Args;
 use serde_json::{json, Value};
 
 pub fn build_metadata(args: &Args) -> Value {
+    let tags: Vec<&str> = args
+        .tags
+        .iter()
+        .map(|t| t.as_str())
+        .filter(|t| !t.is_empty())
+        .collect();
+
     json!({
         "snippet": {
             "title": args.title,
             "description": args.description,
-            "tags": args.tags,
+            "tags": tags,
             "categoryId": args.category.to_string(),
         },
         "status": {
@@ -51,6 +58,14 @@ mod tests {
     fn empty_tags_produce_empty_array() {
         let mut args = sample_args();
         args.tags = vec![];
+        let body = build_metadata(&args);
+        assert_eq!(body["snippet"]["tags"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn empty_string_tags_are_filtered_out() {
+        let mut args = sample_args();
+        args.tags = vec!["".to_string()];
         let body = build_metadata(&args);
         assert_eq!(body["snippet"]["tags"].as_array().unwrap().len(), 0);
     }

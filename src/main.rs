@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     eprintln!();
+    eprintln!("Video ID: {}", result.video_id);
     println!("{}", result.video_url);
 
     Ok(())

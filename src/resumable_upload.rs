@@ -4,6 +4,7 @@ use anyhow::{anyhow, Context};
 use serde_json::Value;
 use std::path::Path;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 const UPLOAD_ENDPOINT: &str =
     "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
@@ -16,6 +17,26 @@ pub struct UploadResult {
 enum ChunkOutcome {
     Incomplete(u64),
     Complete(String),
+}
+
+/// Marker error indicating the upload session URI is no longer valid
+/// (the server returned 404 or 410), distinct from transient failures
+/// like network errors or 5xx responses. Callers use this to decide
+/// whether to discard resume state and start a fresh session, versus
+/// propagating the error and preserving state for a retry.
+#[derive(Debug)]
+struct SessionExpired;
+
+impl std::fmt::Display for SessionExpired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "upload session expired")
+    }
+}
+
+impl std::error::Error for SessionExpired {}
+
+fn is_session_expired(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<SessionExpired>().is_some()
 }
 
 /// Parses a `Range: bytes=0-N` response header into the number of bytes
@@ -51,11 +72,13 @@ async fn create_session(
 
 async fn query_uploaded_bytes(
     http: &reqwest::Client,
+    access_token: &str,
     session_uri: &str,
     total: u64,
 ) -> anyhow::Result<ChunkOutcome> {
     let resp = http
         .put(session_uri)
+        .bearer_auth(access_token)
         .header("Content-Range", format!("bytes */{total}"))
         .header("Content-Length", "0")
         .send()
@@ -80,12 +103,14 @@ async fn query_uploaded_bytes(
                 .to_string();
             Ok(ChunkOutcome::Complete(video_id))
         }
+        404 | 410 => Err(anyhow!(SessionExpired)),
         other => Err(anyhow!("unexpected status {other} querying upload status")),
     }
 }
 
 async fn put_chunk_with_retry(
     http: &reqwest::Client,
+    access_token: &str,
     session_uri: &str,
     range: &ChunkRange,
     chunk: &[u8],
@@ -96,6 +121,7 @@ async fn put_chunk_with_retry(
     loop {
         let resp = http
             .put(session_uri)
+            .bearer_auth(access_token)
             .header("Content-Range", range.content_range_header())
             .header("Content-Length", chunk.len().to_string())
             .body(chunk.to_vec())
@@ -104,7 +130,16 @@ async fn put_chunk_with_retry(
 
         match resp {
             Ok(r) if r.status().as_u16() == 308 => {
-                return Ok(ChunkOutcome::Incomplete(range.end + 1));
+                // The Range header is authoritative: the server may have
+                // accepted fewer bytes than we sent. Fall back to assuming
+                // the whole chunk was accepted only if the header is absent.
+                let next_offset = r
+                    .headers()
+                    .get("Range")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| parse_uploaded_bytes_from_range(s).ok())
+                    .unwrap_or(range.end + 1);
+                return Ok(ChunkOutcome::Incomplete(next_offset));
             }
             Ok(r) if r.status().is_success() => {
                 let body: Value = r.json().await?;
@@ -114,8 +149,8 @@ async fn put_chunk_with_retry(
                     .to_string();
                 return Ok(ChunkOutcome::Complete(video_id));
             }
-            Ok(r) if r.status().as_u16() == 404 => {
-                return Err(anyhow!("upload session expired (404)"));
+            Ok(r) if r.status().as_u16() == 404 || r.status().as_u16() == 410 => {
+                return Err(anyhow!(SessionExpired));
             }
             Ok(r) if r.status().is_client_error() => {
                 let body = r.text().await.unwrap_or_default();
@@ -141,6 +176,11 @@ pub async fn run(
 ) -> anyhow::Result<UploadResult> {
     let file_meta = std::fs::metadata(video_path).context("reading video file metadata")?;
     let file_size = file_meta.len();
+
+    if file_size == 0 {
+        return Err(anyhow!("cannot upload an empty file: {}", video_path.display()));
+    }
+
     let mtime = file_meta
         .modified()?
         .duration_since(std::time::UNIX_EPOCH)?
@@ -150,7 +190,8 @@ pub async fn run(
 
     let (session_uri, mut uploaded) = match state::load_state(&state_path) {
         Some(existing) if state::matches_current_file(&existing, file_size, mtime) => {
-            match query_uploaded_bytes(http, &existing.session_uri, file_size).await {
+            match query_uploaded_bytes(http, access_token, &existing.session_uri, file_size).await
+            {
                 Ok(ChunkOutcome::Incomplete(bytes)) => (existing.session_uri, bytes),
                 Ok(ChunkOutcome::Complete(video_id)) => {
                     state::delete_state(&state_path);
@@ -159,10 +200,11 @@ pub async fn run(
                         video_id,
                     });
                 }
-                Err(_) => {
+                Err(e) if is_session_expired(&e) => {
                     state::delete_state(&state_path);
                     (create_session(http, access_token, metadata).await?, 0)
                 }
+                Err(e) => return Err(e),
             }
         }
         _ => {
@@ -181,23 +223,38 @@ pub async fn run(
         },
     )?;
 
-    let bytes = tokio::fs::read(video_path)
+    let mut file = tokio::fs::File::open(video_path)
         .await
-        .context("reading video file into memory")?;
+        .context("opening video file")?;
+    let mut buf = vec![0u8; CHUNK_SIZE as usize];
 
     while let Some(range) = next_chunk_range(uploaded, file_size, CHUNK_SIZE) {
-        let chunk = &bytes[range.start as usize..=range.end as usize];
-        match put_chunk_with_retry(http, &session_uri, &range, chunk).await? {
-            ChunkOutcome::Incomplete(next_offset) => {
+        let len = range.len() as usize;
+        file.seek(std::io::SeekFrom::Start(range.start))
+            .await
+            .context("seeking within video file")?;
+        file.read_exact(&mut buf[..len])
+            .await
+            .context("reading chunk from video file")?;
+        let chunk = &buf[..len];
+
+        match put_chunk_with_retry(http, access_token, &session_uri, &range, chunk).await {
+            Ok(ChunkOutcome::Incomplete(next_offset)) => {
                 uploaded = next_offset;
                 on_progress(uploaded, file_size);
             }
-            ChunkOutcome::Complete(video_id) => {
+            Ok(ChunkOutcome::Complete(video_id)) => {
                 state::delete_state(&state_path);
                 return Ok(UploadResult {
                     video_url: format!("https://youtu.be/{video_id}"),
                     video_id,
                 });
+            }
+            Err(e) => {
+                if is_session_expired(&e) {
+                    state::delete_state(&state_path);
+                }
+                return Err(e);
             }
         }
     }

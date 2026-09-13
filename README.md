@@ -8,7 +8,8 @@ protocol.
 1. Create a Google Cloud project and enable the YouTube Data API v3.
 2. Create an OAuth client ID of type **Desktop app**.
 3. Download its JSON and save it to:
-   - macOS/Linux: `~/.config/yt-upload/client_secret.json`
+   - Linux: `~/.config/yt-upload/client_secret.json`
+   - macOS: `~/Library/Application Support/yt-upload/client_secret.json`
    - Windows: `%APPDATA%\yt-upload\client_secret.json`
 
 ## Usage

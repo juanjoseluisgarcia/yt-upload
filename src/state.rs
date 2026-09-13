@@ -39,9 +39,24 @@ pub fn load_state(state_path: &Path) -> Option<UploadState> {
 pub fn save_state(state_path: &Path, state: &UploadState) -> std::io::Result<()> {
     if let Some(parent) = state_path.parent() {
         std::fs::create_dir_all(parent)?;
+        restrict_dir_permissions(parent)?;
     }
     let data = serde_json::to_string_pretty(state)?;
     std::fs::write(state_path, data)
+}
+
+/// Restricts a directory's Unix permission bits to owner-only (0700). No-op
+/// on non-Unix platforms, since this crate only documents macOS/Linux
+/// support.
+#[cfg(unix)]
+fn restrict_dir_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn restrict_dir_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 pub fn delete_state(state_path: &Path) {

@@ -53,8 +53,25 @@ pub fn load_token_cache(path: &Path) -> Option<TokenCache> {
 pub fn save_token_cache(path: &Path, cache: &TokenCache) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        restrict_permissions(parent, 0o700)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(cache)?)
+    std::fs::write(path, serde_json::to_string_pretty(cache)?)?;
+    restrict_permissions(path, 0o600)?;
+    Ok(())
+}
+
+/// Restricts a file or directory's Unix permission bits. No-op on
+/// non-Unix platforms, since this crate only documents macOS/Linux
+/// support.
+#[cfg(unix)]
+fn restrict_permissions(path: &Path, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn restrict_permissions(_path: &Path, _mode: u32) -> std::io::Result<()> {
+    Ok(())
 }
 
 pub fn build_authorize_url(client_id: &str, redirect_uri: &str) -> String {
@@ -166,8 +183,20 @@ pub async fn run_installed_app_flow(client: &ClientSecret) -> anyhow::Result<Tok
     let mut buf = [0u8; 4096];
     let n = stream.read(&mut buf).await?;
     let request = String::from_utf8_lossy(&buf[..n]);
-    let code = extract_code_from_request_line(&request)
-        .ok_or_else(|| anyhow::anyhow!("no authorization code found in OAuth redirect"))?;
+    let code = match extract_code_from_request_line(&request) {
+        Some(code) => code,
+        None => {
+            let body =
+                "Authorization was not granted. You can close this tab and return to the terminal.";
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            return Err(anyhow::anyhow!("no authorization code found in OAuth redirect"));
+        }
+    };
 
     let body = "Authorization received. You can close this tab and return to the terminal.";
     let response = format!(
@@ -190,9 +219,20 @@ pub async fn get_valid_access_token(
         if cache.expires_at > now_unix() + 60 {
             return Ok(cache.access_token);
         }
-        let refreshed = refresh_access_token(client, &cache).await?;
-        save_token_cache(cache_path, &refreshed)?;
-        return Ok(refreshed.access_token);
+        match refresh_access_token(client, &cache).await {
+            Ok(refreshed) => {
+                save_token_cache(cache_path, &refreshed)?;
+                return Ok(refreshed.access_token);
+            }
+            Err(_) => {
+                // The refresh token may have been revoked or expired.
+                // Fall back to a fresh browser consent flow rather than
+                // failing the whole program outright.
+                let fresh = run_installed_app_flow(client).await?;
+                save_token_cache(cache_path, &fresh)?;
+                return Ok(fresh.access_token);
+            }
+        }
     }
 
     let fresh = run_installed_app_flow(client).await?;
