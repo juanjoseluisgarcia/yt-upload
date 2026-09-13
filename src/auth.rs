@@ -189,19 +189,41 @@ pub async fn fetch_user_email(access_token: &str) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("Google did not return an email address for this account"))
 }
 
+/// Persists a freshly refreshed token, warning (but not failing) if it
+/// can't be written to disk. The refreshed token is still good to use for
+/// this run even if it couldn't be cached — see `valid_cached_token`.
+fn persist_refreshed_token(
+    save_result: std::io::Result<()>,
+    refreshed: TokenCache,
+) -> Option<TokenCache> {
+    if let Err(e) = save_result {
+        eprintln!("warning: failed to persist refreshed token: {e}");
+    }
+    Some(refreshed)
+}
+
 /// Returns the cached session if it's usable right now: present, and
-/// either not close to expiry or successfully refreshed (with the
-/// refreshed token persisted back to `cache_path`). Returns `None` if
-/// there's no cache, or the refresh token has been revoked/expired —
-/// callers treat that the same as "not logged in".
+/// either not close to expiry or successfully refreshed. If the refresh
+/// call itself fails (revoked token, or a transient network error), a
+/// warning is printed to stderr and `None` is returned — callers treat
+/// that as "not logged in". If the refresh succeeds but persisting the
+/// new token to `cache_path` fails, the in-memory refreshed token is
+/// still returned (with a warning), since it's valid for this run even
+/// if it couldn't be cached.
 async fn valid_cached_token(client: &ClientSecret, cache_path: &Path) -> Option<TokenCache> {
     let cache = load_token_cache(cache_path)?;
     if cache.expires_at > now_unix() + 60 {
         return Some(cache);
     }
-    let refreshed = refresh_access_token(client, &cache).await.ok()?;
-    save_token_cache(cache_path, &refreshed).ok()?;
-    Some(refreshed)
+    let refreshed = match refresh_access_token(client, &cache).await {
+        Ok(refreshed) => refreshed,
+        Err(e) => {
+            eprintln!("warning: token refresh failed: {e}");
+            return None;
+        }
+    };
+    let save_result = save_token_cache(cache_path, &refreshed);
+    persist_refreshed_token(save_result, refreshed)
 }
 
 /// Returns the currently cached access token, silently refreshing it if
@@ -390,6 +412,33 @@ mod tests {
 
         let result = valid_cached_token(&client, &cache_path).await;
         assert_eq!(result.unwrap().access_token, "a-1");
+    }
+
+    #[test]
+    fn persist_refreshed_token_returns_token_when_save_succeeds() {
+        let refreshed = TokenCache {
+            refresh_token: "r-1".to_string(),
+            access_token: "a-1".to_string(),
+            expires_at: 1_700_000_000,
+        };
+
+        let result = persist_refreshed_token(Ok(()), refreshed.clone());
+        assert_eq!(result.unwrap().access_token, refreshed.access_token);
+    }
+
+    #[test]
+    fn persist_refreshed_token_still_returns_token_when_save_fails() {
+        // The refreshed token is valid in-memory even if it couldn't be
+        // persisted to disk (e.g. read-only config dir, disk full).
+        let refreshed = TokenCache {
+            refresh_token: "r-1".to_string(),
+            access_token: "a-1".to_string(),
+            expires_at: 1_700_000_000,
+        };
+        let save_result = Err(std::io::Error::other("disk full"));
+
+        let result = persist_refreshed_token(save_result, refreshed.clone());
+        assert_eq!(result.unwrap().access_token, refreshed.access_token);
     }
 
     #[test]
