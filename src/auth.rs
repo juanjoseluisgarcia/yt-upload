@@ -167,6 +167,28 @@ pub async fn refresh_access_token(
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct UserInfoResponse {
+    email: Option<String>,
+}
+
+/// Resolves the email of the account an access token belongs to. Requires
+/// the `userinfo.email` scope to have been granted at login time.
+pub async fn fetch_user_email(access_token: &str) -> anyhow::Result<String> {
+    let http = reqwest::Client::new();
+    let info: UserInfoResponse = http
+        .get("https://www.googleapis.com/oauth2/v2/userinfo")
+        .bearer_auth(access_token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    info.email
+        .ok_or_else(|| anyhow::anyhow!("Google did not return an email address for this account"))
+}
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
