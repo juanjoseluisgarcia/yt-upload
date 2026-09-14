@@ -23,12 +23,19 @@ automatically as a build dependency) and also installs man pages —
 
 ## Setup
 
+yt-upload doesn't ship a built-in Google API client — you authorize it
+with your own, which is free and takes about five minutes:
+
 1. Create a Google Cloud project and enable the YouTube Data API v3.
 2. Create an OAuth client ID of type **Desktop app**.
 3. Download its JSON and save it to:
    - Linux: `~/.config/yt-upload/client_secret.json`
    - macOS: `~/Library/Application Support/yt-upload/client_secret.json`
    - Windows: `%APPDATA%\yt-upload\client_secret.json`
+
+For the full walkthrough — exact console menus, the consent-screen
+"Testing" mode caveat (7-day token expiry) and how to avoid it — run
+`yt-upload login --help` or see `man yt-upload-login`.
 
 ## Usage
 

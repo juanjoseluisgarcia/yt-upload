@@ -26,11 +26,58 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// The full walkthrough for creating your own Google Cloud OAuth client,
+/// shown by `yt-upload login --help` and in `man yt-upload-login`.
+/// yt-upload doesn't ship a built-in Google API client (see the README
+/// for why), so each user authorizes it with their own project - this
+/// takes about five minutes and is free.
+const LOGIN_SETUP_WALKTHROUGH: &str = "\
+Getting your own Google Cloud OAuth credentials:
+
+  1. Go to https://console.cloud.google.com/ and create a new project
+     (or pick an existing one you don't mind reusing).
+
+  2. Enable the YouTube Data API v3: in the left sidebar, go to
+     \"APIs & Services\" > \"Library\", search for \"YouTube Data API v3\",
+     and click Enable.
+
+  3. Configure the consent screen: \"APIs & Services\" > \"OAuth consent
+     screen\". Choose \"External\" as the user type, fill in an app name
+     and your email for the required fields, and save. Under \"Test
+     users\", add your own Google account - this keeps the app in
+     \"Testing\" mode, which needs no review from Google for personal
+     use.
+
+  4. Create the OAuth client: \"APIs & Services\" > \"Credentials\" >
+     \"+ Create Credentials\" > \"OAuth client ID\". Choose \"Desktop app\"
+     as the application type, give it any name, and click Create.
+
+  5. Download its JSON (the download icon next to the client in the
+     credentials list) and save it to:
+       macOS:   ~/Library/Application Support/yt-upload/client_secret.json
+       Linux:   ~/.config/yt-upload/client_secret.json
+       Windows: %APPDATA%\\yt-upload\\client_secret.json
+
+  6. Run `yt-upload login`.
+
+None of this costs money: creating the project, enabling the API, and
+authorizing your own account are all free, with no billing account
+required.
+
+A note on \"Testing\" mode: while your OAuth consent screen is
+unverified, Google expires its refresh tokens after 7 days, so you'll
+need to run `yt-upload login` again about weekly. To avoid this, go
+back to \"OAuth consent screen\" and click \"Publish App\" to move it to
+\"In Production\" - you'll see an \"unverified app\" warning during your
+own login (safe to click through, since you're the only user of your
+own credentials), but after that your session lasts indefinitely.";
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Upload a video to YouTube using the resumable upload protocol
     Upload(UploadArgs),
     /// Authorize this CLI with a Google account
+    #[command(after_long_help = LOGIN_SETUP_WALKTHROUGH)]
     Login {
         /// Re-run the browser consent flow even if already logged in
         #[arg(long)]
